@@ -174,10 +174,18 @@ func (r *Repo) timestamp() (*data.Timestamp, error) {
 }
 
 func (r *Repo) GenKey(role string) (string, error) {
-	return r.GenKeyWithExpires(role, data.DefaultExpires("root"))
+	return r.GenKeyWithType(role, data.KeyTypeEd25519)
+}
+
+func (r *Repo) GenKeyWithType(role string, keyType string) (string, error) {
+	return r.GenKeyWithTypeAndExpires(role, keyType, data.DefaultExpires("root"))
 }
 
 func (r *Repo) GenKeyWithExpires(keyRole string, expires time.Time) (string, error) {
+	return r.GenKeyWithTypeAndExpires(keyRole, data.KeyTypeEd25519, expires)
+}
+
+func (r *Repo) GenKeyWithTypeAndExpires(keyRole string, keyType string, expires time.Time) (string, error) {
 	if !verify.ValidRole(keyRole) {
 		return "", ErrInvalidRole{keyRole}
 	}
@@ -191,7 +199,7 @@ func (r *Repo) GenKeyWithExpires(keyRole string, expires time.Time) (string, err
 		return "", err
 	}
 
-	key, err := sign.GenerateEd25519Key()
+	key, err := sign.GenerateKey(keyType)
 	if err != nil {
 		return "", err
 	}

@@ -45,12 +45,14 @@ snapshots (i.e. by passing `--consistent-snapshot=false`). If consistent
 snapshots should be generated, the repository will be implicitly
 initialized to do so when generating keys.
 
-#### `tuf gen-key [--expires=<days>] <role>`
+#### `tuf gen-key [--type=<type> --expires=<days>] <role>`
 
 Prompts the user for an encryption passphrase (unless the
 `--insecure-plaintext` flag is set), then generates a new signing key and
 writes it to the relevant key file in the `keys` directory. It also stages
 the addition of the new key to the `root` manifest.
+
+The supported key types are `ed25519` (default) or `ecdsa-sha2-nistp256`.
 
 #### `tuf add [<path>...]`
 

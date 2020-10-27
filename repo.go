@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/flynn/go-tuf/keystore"
 	"io"
 	"path"
 	"strings"
@@ -47,19 +48,20 @@ type LocalStore interface {
 	WalkStagedTargets(paths []string, targetsFn targetsWalkFunc) error
 
 	Commit(map[string]json.RawMessage, bool, map[string]data.Hashes) error
-	GetSigningKeys(string) ([]sign.Signer, error)
-	SavePrivateKey(string, *sign.PrivateKey) error
+	//GetSigningKeys(string) ([]sign.Signer, error)
+	//SavePrivateKey(string, *sign.PrivateKey) error
 	Clean() error
 }
 
 type Repo struct {
 	local          LocalStore
+	manager        keystore.KeysManager
 	hashAlgorithms []string
 	meta           map[string]json.RawMessage
 }
 
-func NewRepo(local LocalStore, hashAlgorithms ...string) (*Repo, error) {
-	r := &Repo{local: local, hashAlgorithms: hashAlgorithms}
+func NewRepo(local LocalStore, manager keystore.KeysManager, hashAlgorithms ...string) (*Repo, error) {
+	r := &Repo{local: local, manager: manager, hashAlgorithms: hashAlgorithms}
 
 	var err error
 	r.meta, err = local.GetMeta()
@@ -194,19 +196,16 @@ func (r *Repo) GenKeyWithTypeAndExpires(keyRole string, keyType string, expires 
 		return "", ErrInvalidExpires{expires}
 	}
 
+
+
 	root, err := r.root()
 	if err != nil {
 		return "", err
 	}
 
-	key, err := sign.GenerateKey(keyType)
-	if err != nil {
-		return "", err
-	}
-	if err := r.local.SavePrivateKey(keyRole, key); err != nil {
-		return "", err
-	}
-	pk := key.PublicData()
+	key, err := r.manager.GenerateKey(keyRole, keyType)
+
+	pk := key.GetPublicData()
 
 	role, ok := root.Roles[keyRole]
 	if !ok {
@@ -215,7 +214,7 @@ func (r *Repo) GenKeyWithTypeAndExpires(keyRole string, keyType string, expires 
 	}
 	role.KeyIDs = append(role.KeyIDs, pk.ID())
 
-	root.Keys[pk.ID()] = pk
+	root.Keys[pk.ID()] = pk.GetKey()
 	root.Expires = expires.Round(time.Second)
 	root.Version++
 
@@ -347,31 +346,34 @@ func (r *Repo) Sign(name string) error {
 // keys are returned (revoked root keys still need to sign new root metadata so
 // clients can verify the new root.json and update their keys db accordingly).
 func (r *Repo) getSigningKeys(name string) ([]sign.Signer, error) {
-	signingKeys, err := r.local.GetSigningKeys(name)
-	if err != nil {
-		return nil, err
-	}
-	if name == "root" {
-		return signingKeys, nil
-	}
-	db, err := r.db()
-	if err != nil {
-		return nil, err
-	}
-	role := db.GetRole(name)
-	if role == nil {
-		return nil, nil
-	}
-	if len(role.KeyIDs) == 0 {
-		return nil, nil
-	}
-	keys := make([]sign.Signer, 0, len(role.KeyIDs))
-	for _, key := range signingKeys {
-		if _, ok := role.KeyIDs[key.ID()]; ok {
-			keys = append(keys, key)
-		}
-	}
-	return keys, nil
+	//TODO: impl me
+	//signingKeys, err := r.local.GetSigningKeys(name)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//if name == "root" {
+	//	return signingKeys, nil
+	//}
+	//db, err := r.db()
+	//if err != nil {
+	//	return nil, err
+	//}
+	//role := db.GetRole(name)
+	//if role == nil {
+	//	return nil, nil
+	//}
+	//if len(role.KeyIDs) == 0 {
+	//	return nil, nil
+	//}
+	//keys := make([]sign.Signer, 0, len(role.KeyIDs))
+	//for _, key := range signingKeys {
+	//	if _, ok := role.KeyIDs[key.ID()]; ok {
+	//		keys = append(keys, key)
+	//	}
+	//}
+	//return keys, nil
+
+	return nil, nil
 }
 
 func (r *Repo) signedMeta(name string) (*data.Signed, error) {

@@ -10,7 +10,7 @@ import (
 
 func init() {
 	register("gen-key", cmdGenKey, `
-usage: tuf gen-key [--type=<type> --expires=<days>] <role>
+usage: tuf gen-key [--type=<type> --expires=<days> --manager=<type>] <role>
 
 Generate a new signing key for the given role.
 
@@ -20,7 +20,8 @@ with the addition of the key's ID to the role's list of key IDs.
 
 Options:
   --expires=<days>   Set the root manifest to expire <days> days from now.
-  --type=<type>      Chooses one of key types. The default is ed25519, alternative is ecdsa-sha2-nistp256
+  --manager=<type>   Chooses one of key manager. Options are: local and kms. The default is local.  
+  --type=<type>      Chooses one of key types. Options are: ed25519 and ecdsa-sha2-nistp256. The default is ed25519.
 `)
 }
 
@@ -29,6 +30,7 @@ func cmdGenKey(args *docopt.Args, repo *tuf.Repo) error {
 	var id string
 	var err error
 	var keyType string
+
 	if keyType = args.String["--type"]; keyType == "" {
 		keyType = data.KeyTypeEd25519
 	}
@@ -39,7 +41,7 @@ func cmdGenKey(args *docopt.Args, repo *tuf.Repo) error {
 		}
 		id, err = repo.GenKeyWithTypeAndExpires(role, keyType, expires)
 	} else {
-		id, err = repo.GenKeyWithType(role, keyType)
+		id, err = repo.GenKeyWithType(role,keyType)
 	}
 	if err != nil {
 		return err

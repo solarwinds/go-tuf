@@ -15,6 +15,7 @@ import (
 	"github.com/flynn/go-tuf"
 	"github.com/flynn/go-tuf/util"
 	"golang.org/x/crypto/ssh/terminal"
+	"github.com/flynn/go-tuf/keystore"
 )
 
 func main() {
@@ -103,11 +104,22 @@ func runCommand(name string, args []string, dir string, insecure bool) error {
 		return err
 	}
 
-	var p util.PassphraseFunc
-	if !insecure {
-		p = getPassphrase
+	var keysManagerId string
+	if keysManagerId = parsedArgs.String["--manager"]; keysManagerId == "" {
+		keysManagerId = keystore.KeysManagerIdLocal
 	}
-	repo, err := tuf.NewRepo(tuf.FileSystemStore(dir, p))
+	var manager keystore.KeysManager
+	if keysManagerId == keystore.KeysManagerIdLocal {
+		var p util.PassphraseFunc
+		if !insecure {
+			p = getPassphrase
+		}
+		manager = keystore.NewLocalKeysManager(dir, p)
+	} else if keysManagerId == keystore.KeysMangerIdKms {
+		manager = keystore.NewKmsKeysManager()
+	}
+
+	repo, err := tuf.NewRepo(tuf.FileSystemStore(dir), manager)
 	if err != nil {
 		return err
 	}

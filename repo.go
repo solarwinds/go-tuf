@@ -205,7 +205,10 @@ func (r *Repo) GenKeyWithTypeAndExpires(keyRole string, keyType string, expires 
 
 	key, err := r.manager.GenerateKey(keyRole, keyType)
 
-	pk := key.GetPublicData()
+	pk, err := key.GetPublicKey()
+	if err != nil {
+		return "", err
+	}
 
 	role, ok := root.Roles[keyRole]
 	if !ok {
@@ -214,7 +217,7 @@ func (r *Repo) GenKeyWithTypeAndExpires(keyRole string, keyType string, expires 
 	}
 	role.KeyIDs = append(role.KeyIDs, pk.ID())
 
-	root.Keys[pk.ID()] = pk.GetKey()
+	root.Keys[pk.ID()] = pk
 	root.Expires = expires.Round(time.Second)
 	root.Version++
 

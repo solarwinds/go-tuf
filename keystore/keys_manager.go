@@ -1,8 +1,6 @@
 package keystore
 
-import (
-	"github.com/flynn/go-tuf/data"
-)
+import "github.com/flynn/go-tuf/data"
 
 type KeysManager interface
 {
@@ -10,13 +8,7 @@ type KeysManager interface
 }
 
 type PrivateKeyHandle interface {
-	GetPublicData() PublicDataHandle
-}
-
-// TODO: revisit, possibly not needed
-type PublicDataHandle interface {
-	ID() string
-	GetKey() *data.Key
+	GetPublicKey() (*data.Key, error)
 }
 
 const (

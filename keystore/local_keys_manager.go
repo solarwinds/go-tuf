@@ -27,11 +27,6 @@ type LocalPrivateKeyHandle struct // implements PrivateKeyHandle
 	privateKey *sign.PrivateKey
 }
 
-type LocalPublicDataHandle struct //  implements PublicDataHandle
-{
-	publicData *data.Key
-}
-
 type persistedKeys struct {
 	Encrypted bool            `json:"encrypted"`
 	Data      json.RawMessage `json:"data"`
@@ -189,16 +184,6 @@ func (m *LocalKeysManager) createDirs() error {
 	return nil
 }
 
-func (l LocalPublicDataHandle) ID() string {
-	return l.publicData.ID()
-}
-
-func (l LocalPublicDataHandle) GetKey() *data.Key {
-	return l.publicData
-}
-
-func (l LocalPrivateKeyHandle) GetPublicData() PublicDataHandle {
-	return &LocalPublicDataHandle{
-		publicData: l.privateKey.PublicData(),
-	}
+func (l LocalPrivateKeyHandle) GetPublicKey() (*data.Key, error) {
+	return l.privateKey.PublicData(), nil
 }

@@ -70,27 +70,48 @@ func (m *KmsKeysManager) getKmsService() *kms.KMS {
 
 func (m *KmsKeysManager) GenerateKey(keyRole string, keyType string) (PrivateKeyHandle, error) {
 	service := m.getKmsService()
+	description := "This is TUF key for " + keyRole + " role."
+	createKeyInput := &kms.CreateKeyInput{
 
-	input := &kms.CreateKeyInput{
+		Description: &description,
 		Tags: []*kms.Tag{
 			{
-				TagKey:   aws.String("CreatedBy"),
-				TagValue: aws.String("ExampleUser"),
+				TagKey:   aws.String("Role"),
+				TagValue: aws.String(keyRole),
+			},
+			{
+				TagKey:   aws.String("Source"),
+				TagValue: aws.String("TUF"),
 			},
 		},
 	}
 
 	customerMasterKeySec := kms.DataKeyPairSpecRsa2048
-	input.CustomerMasterKeySpec = &customerMasterKeySec
+	createKeyInput.CustomerMasterKeySpec = &customerMasterKeySec
 
 	keyUsageTypeSignVerify := kms.KeyUsageTypeSignVerify
-	input.KeyUsage = &keyUsageTypeSignVerify
+	createKeyInput.KeyUsage = &keyUsageTypeSignVerify
 
-	output, err := service.CreateKey(input)
-
+	createKeyOutput, err := service.CreateKey(createKeyInput)
 	if err != nil {
 		return nil, err
 	}
 
-	return &KmsPrivateKeyHandle{manager: m, keyId: *output.KeyMetadata.KeyId}, nil
+	privateKeyHandle := &KmsPrivateKeyHandle{manager: m, keyId: *createKeyOutput.KeyMetadata.KeyId}
+	publicKey, err := privateKeyHandle.GetPublicKey()
+	if err != nil {
+		return nil, err
+	}
+
+	alias := "alias/TUF_" + keyRole + "_" + publicKey.ID()
+	createInput := &kms.CreateAliasInput{
+		AliasName:   &alias,
+		TargetKeyId: createKeyOutput.KeyMetadata.KeyId,
+	}
+	_, err = service.CreateAlias(createInput)
+	if err != nil {
+		return nil, err
+	}
+
+	return privateKeyHandle, nil
 }

@@ -204,6 +204,9 @@ func (r *Repo) GenKeyWithTypeAndExpires(keyRole string, keyType string, expires 
 	}
 
 	key, err := r.manager.GenerateKey(keyRole, keyType)
+	if err != nil {
+		return "", err
+	}
 
 	pk, err := key.GetPublicKey()
 	if err != nil {

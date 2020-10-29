@@ -4,7 +4,9 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/kms"
+	"github.com/aws/aws-sdk-go/service/sts"
 	"github.com/flynn/go-tuf/data"
+	"strings"
 )
 
 type KmsKeysManager struct // implements KeysManager
@@ -33,13 +35,13 @@ func (k KmsPublicDataHandle) GetKey() *data.Key {
 
 func (h *KmsPrivateKeyHandle) GetPublicKey() (*data.Key, error) {
 
-	service  := h.manager.getKmsService()
+	kmsService, _ := h.manager.getServices()
 
 	input := &kms.GetPublicKeyInput{
 		KeyId:       &h.keyId,
 	}
 	
-	output, err := service.GetPublicKey(input)
+	output, err := kmsService.GetPublicKey(input)
 	if err != nil {
 		return nil, err
 	}
@@ -55,25 +57,25 @@ func NewKmsKeysManager() *KmsKeysManager {
 	return &KmsKeysManager{}
 }
 
-func (m *KmsKeysManager) getKmsService() *kms.KMS {
+func (m *KmsKeysManager) getServices() (*kms.KMS, *sts.STS) {
 	sess := session.Must(session.NewSession())
 
 	region := "us-west-2"
 	sess.Config.Region = &region
 
-	service := kms.New(sess)
+	kmsService := kms.New(sess)
+	stsService := sts.New(sess)
 
-	return service
+	return kmsService, stsService
 }
 
 
 
 func (m *KmsKeysManager) GenerateKey(keyRole string, keyType string) (PrivateKeyHandle, error) {
-	service := m.getKmsService()
-	description := "This is TUF key for " + keyRole + " role."
+	kmsService, stsService := m.getServices()
 	createKeyInput := &kms.CreateKeyInput{
 
-		Description: &description,
+		Description: aws.String("This is TUF key for " + keyRole + " role."),
 		Tags: []*kms.Tag{
 			{
 				TagKey:   aws.String("Role"),
@@ -92,7 +94,89 @@ func (m *KmsKeysManager) GenerateKey(keyRole string, keyType string) (PrivateKey
 	keyUsageTypeSignVerify := kms.KeyUsageTypeSignVerify
 	createKeyInput.KeyUsage = &keyUsageTypeSignVerify
 
-	createKeyOutput, err := service.CreateKey(createKeyInput)
+	callerIdentityInput := &sts.GetCallerIdentityInput{}
+	callerIdentityOutput, err := stsService.GetCallerIdentity(callerIdentityInput)
+	if err != nil {
+		return nil, err
+	}
+
+	var policy = `{
+    "Id": "custom-policy-2016-12-09",
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "Enable IAM User Permissions",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::{ACCOUNT}:root"
+            },
+            "Action": "kms:*",
+            "Resource": "*"
+        },
+        {
+            "Sid": "Allow access for Key Administrators",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "{ARN}"
+            },
+            "Action": [
+                "kms:Create*",
+                "kms:Describe*",
+                "kms:Enable*",
+                "kms:List*",
+                "kms:Put*",
+                "kms:Update*",
+                "kms:Revoke*",
+                "kms:Disable*",
+                "kms:Get*",
+                "kms:Delete*",
+                "kms:ScheduleKeyDeletion",
+                "kms:CancelKeyDeletion"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "Allow use of the key",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "{ARN}"
+            },
+            "Action": [
+                "kms:Encrypt",
+                "kms:Decrypt",
+                "kms:ReEncrypt*",
+                "kms:GenerateDataKey*",
+                "kms:DescribeKey"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "Allow attachment of persistent resources",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "{ARN}"
+            },
+            "Action": [
+                "kms:CreateGrant",
+                "kms:ListGrants",
+                "kms:RevokeGrant"
+            ],
+            "Resource": "*",
+            "Condition": {
+                "Bool": {
+                    "kms:GrantIsForAWSResource": "true"
+                }
+            }
+        }
+    ]
+}
+`
+
+	replacer := strings.NewReplacer("{ARN}", *callerIdentityOutput.Arn, "{ACCOUNT}", *callerIdentityOutput.Account)
+	policy = replacer.Replace(policy)
+	createKeyInput.Policy = aws.String(policy)
+
+	createKeyOutput, err := kmsService.CreateKey(createKeyInput)
 	if err != nil {
 		return nil, err
 	}
@@ -103,15 +187,31 @@ func (m *KmsKeysManager) GenerateKey(keyRole string, keyType string) (PrivateKey
 		return nil, err
 	}
 
-	alias := "alias/TUF_" + keyRole + "_" + publicKey.ID()
 	createInput := &kms.CreateAliasInput{
-		AliasName:   &alias,
+		AliasName:   aws.String("alias/TUF_" + keyRole + "_" + string(publicKey.ID()[0:8])),
 		TargetKeyId: createKeyOutput.KeyMetadata.KeyId,
 	}
-	_, err = service.CreateAlias(createInput)
+	_, err = kmsService.CreateAlias(createInput)
 	if err != nil {
 		return nil, err
 	}
 
+	tagInput := &kms.TagResourceInput{
+		KeyId: createKeyOutput.KeyMetadata.KeyId,
+		Tags: []*kms.Tag{
+			{
+				TagKey:   aws.String("TUF Key Id"),
+				TagValue: aws.String(publicKey.ID()),
+			},
+		},
+	}
+	_, err = kmsService.TagResource(tagInput)
+	if err != nil {
+		return nil, err
+	}
+	
+
+
+	
 	return privateKeyHandle, nil
 }

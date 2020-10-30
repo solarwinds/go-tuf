@@ -116,7 +116,7 @@ func runCommand(name string, args []string, dir string, insecure bool) error {
 		}
 		manager = keystore.NewLocalKeysManager(dir, p)
 	} else if keysManagerId == keystore.KeysMangerIdKms {
-		manager = keystore.NewKmsKeysManager()
+		manager = keystore.NewKmsKeysManager(dir)
 	}
 
 	repo, err := tuf.NewRepo(tuf.FileSystemStore(dir), manager)

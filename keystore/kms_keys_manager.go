@@ -13,19 +13,20 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 type KmsKeysManager struct // implements KeysManager
 {
-	dir 	string
-	entries []KmsKeyEntry
+	dir 	           string
+	entries            []KmsKeyEntry
+	entriesStorePath   string
+	loadKeyEntriesOnce sync.Once
 }
-
-
 
 type KmsPrivateKeyHandle struct // implements PrivateKeyHandle
 {
-	keyId string
+	keyId   string
 	manager *KmsKeysManager
 }
 
@@ -63,7 +64,9 @@ func (h *KmsPrivateKeyHandle) GetPublicKey() (*data.Key, error) {
 }
 
 func NewKmsKeysManager(dir string) *KmsKeysManager {
-	return &KmsKeysManager{dir: dir, entries: []KmsKeyEntry{}}
+
+	entriesStorePath := path.Join(dir, "kms", "kms.json")
+	return &KmsKeysManager{dir: dir, entriesStorePath: entriesStorePath, entries: []KmsKeyEntry{}}
 }
 
 func (m *KmsKeysManager) getServices() (*kms.KMS, *sts.STS) {
@@ -253,6 +256,21 @@ func (m *KmsKeysManager) createDirs() error {
 }
 
 func (m *KmsKeysManager) addKeyEntry(entry *KmsKeyEntry) error {
+	var err error = nil
+	m.loadKeyEntriesOnce.Do(func() {
+		err = m.loadKeyEntries()
+	})
+
+	if err != nil {
+		return err
+	}
+
+	for _, e := range m.entries {
+		if e.PublicKeyId == entry.PublicKeyId {
+			return nil
+		}
+	}
+
 	m.entries = append(m.entries, *entry)
 	return m.saveKeyEntries()
 }
@@ -264,14 +282,27 @@ func (m *KmsKeysManager) saveKeyEntries() error {
 	j, err := json.MarshalIndent(m.entries, "", "    ")
 	if err != nil { return err }
 
-	p := path.Join(m.dir, "kms", "kms.json")
-	err = ioutil.WriteFile(p, j, 0644)
+
+	err = ioutil.WriteFile(m.entriesStorePath, j, 0644)
 	if err != nil { return err}
 
 	return nil
 }
 
+func (m *KmsKeysManager) loadKeyEntries() error {
+	_, err := os.Stat(m.entriesStorePath)
+	if os.IsNotExist(err) {
+		return nil
+	}
 
+	j, err := ioutil.ReadFile(m.entriesStorePath)
+	if err != nil { return err }
+
+	err = json.Unmarshal(j, &m.entries)
+	if err != nil  { return err }
+
+	return nil
+}
 
 type KmsKeyEntry struct {
 	Arn         string `json:"arn"`

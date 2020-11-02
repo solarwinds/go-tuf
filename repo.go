@@ -196,14 +196,16 @@ func (r *Repo) GenKeyWithTypeAndExpires(keyRole string, keyType string, expires 
 		return "", ErrInvalidExpires{expires}
 	}
 
-
-
-	root, err := r.root()
+	key, err := r.manager.GenerateKey(keyRole, keyType)
 	if err != nil {
 		return "", err
 	}
 
-	key, err := r.manager.GenerateKey(keyRole, keyType)
+	return r.installKey(key, keyRole, expires)
+}
+
+func (r *Repo) installKey(key keystore.PrivateKeyHandle, keyRole string, expires time.Time) (string, error) {
+	root, err := r.root()
 	if err != nil {
 		return "", err
 	}
@@ -225,6 +227,27 @@ func (r *Repo) GenKeyWithTypeAndExpires(keyRole string, keyType string, expires 
 	root.Version++
 
 	return pk.ID(), r.setMeta("root.json", root)
+}
+
+func (r *Repo) ImportKeyWithExpires(keyId string, keyRole string, expires time.Time) (string, error) {
+	if !verify.ValidRole(keyRole) {
+		return "", ErrInvalidRole{keyRole}
+	}
+
+	if !validExpires(expires) {
+		return "", ErrInvalidExpires{expires}
+	}
+
+	key, err := r.manager.ImportKey(keyId)
+	if err != nil {
+		return "", err
+	}
+
+	return r.installKey(key, keyRole, expires)
+}
+
+func (r *Repo) ImportKey(keyId string, keyRole string) (string, error) {
+	return r.ImportKeyWithExpires(keyId, keyRole, data.DefaultExpires("root"))
 }
 
 func validExpires(expires time.Time) bool {
@@ -678,3 +701,5 @@ func (r *Repo) fileMeta(name string) (data.FileMeta, error) {
 	}
 	return util.GenerateFileMeta(bytes.NewReader(b), r.hashAlgorithms...)
 }
+
+

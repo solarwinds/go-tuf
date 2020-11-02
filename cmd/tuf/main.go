@@ -31,6 +31,7 @@ Options:
 Commands:
   help         Show usage for a specific command
   gen-key      Generate a new signing key for a specific manifest
+  use-key      Use a key which already exists in an external key manager for signing a specific manifest
   revoke-key   Revoke a signing key
   add          Add target file(s)
   remove       Remove a target file

@@ -2,6 +2,7 @@ package keystore
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/kms"
@@ -19,6 +20,8 @@ type KmsKeysManager struct // implements KeysManager
 	dir 	string
 	entries []KmsKeyEntry
 }
+
+
 
 type KmsPrivateKeyHandle struct // implements PrivateKeyHandle
 {
@@ -209,8 +212,32 @@ func (m *KmsKeysManager) GenerateKey(keyRole string, keyType string) (PrivateKey
 	_, err = kmsService.TagResource(tagInput)
 	if err != nil { return nil, err }
 
-	m.entries = append(m.entries, KmsKeyEntry	{ Arn: *createKeyOutput.KeyMetadata.Arn, PublicKeyId:publicKey.ID() })
-	err = m.saveKeyEntries()
+	err = m.addKeyEntry(&KmsKeyEntry	{ Arn: *createKeyOutput.KeyMetadata.Arn, PublicKeyId:publicKey.ID() })
+	if err != nil { return nil, err }
+
+	return privateKeyHandle, nil
+}
+
+func (m *KmsKeysManager) ImportKey(externalKeyId string) (PrivateKeyHandle, error) {
+	kmsService, _ := m.getServices()
+
+	describeKeyInput := &kms.DescribeKeyInput{
+		KeyId: aws.String(externalKeyId),
+	}
+
+	describeKeyOutput, err := kmsService.DescribeKey(describeKeyInput)
+	if err != nil { return nil, err }
+
+	algorithms := describeKeyOutput.KeyMetadata.EncryptionAlgorithms
+	for _, algorithm := range algorithms {
+		fmt.Println(algorithm)
+	}
+
+	privateKeyHandle := &KmsPrivateKeyHandle{manager: m, keyId: *describeKeyOutput.KeyMetadata.KeyId}
+	publicKey, err := privateKeyHandle.GetPublicKey()
+	if err != nil { return nil, err }
+
+	err = m.addKeyEntry(&KmsKeyEntry	{ Arn: *describeKeyOutput.KeyMetadata.Arn, PublicKeyId:publicKey.ID() })
 	if err != nil { return nil, err }
 
 	return privateKeyHandle, nil
@@ -223,6 +250,11 @@ func (m *KmsKeysManager) createDirs() error {
 		}
 	}
 	return nil
+}
+
+func (m *KmsKeysManager) addKeyEntry(entry *KmsKeyEntry) error {
+	m.entries = append(m.entries, *entry)
+	return m.saveKeyEntries()
 }
 
 func (m *KmsKeysManager) saveKeyEntries() error {
@@ -238,6 +270,8 @@ func (m *KmsKeysManager) saveKeyEntries() error {
 
 	return nil
 }
+
+
 
 type KmsKeyEntry struct {
 	Arn         string `json:"arn"`

@@ -22,6 +22,7 @@ type LocalKeysManager struct // implements KeysManager
 	signers map[string][]sign.Signer
 }
 
+
 type LocalPrivateKeyHandle struct // implements PrivateKeyHandle
 {
 	privateKey *sign.PrivateKey
@@ -61,6 +62,10 @@ func (m *LocalKeysManager) GenerateKey(keyRole string, keyType string) (PrivateK
 	return &LocalPrivateKeyHandle{ privateKey: privateKey }, nil
 }
 
+
+func (m *LocalKeysManager) ImportKey(id string) (PrivateKeyHandle, error) {
+	return nil, fmt.Errorf("local key manager does not support key import, use gen-key instead")
+}
 
 func (m *LocalKeysManager) SavePrivateKey(role string, key *sign.PrivateKey) error {
 	if err := m.createDirs(); err != nil {

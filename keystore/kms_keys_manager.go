@@ -295,13 +295,13 @@ func (m *KmsKeysManager) ImportKey(keyRole string, externalKeyId string) (Privat
 
 	var keyType string
 	spec := *describeKeyOutput.KeyMetadata.CustomerMasterKeySpec
-	if spec == kms.SigningAlgorithmSpecRsassaPssSha256 {
+	if spec == kms.CustomerMasterKeySpecRsa2048 {
 		keyType = data.KeyTypeRSASSA_PSS_SHA256
-	} else if spec == kms.SigningAlgorithmSpecRsassaPssSha256 {
+	} else if spec == kms.CustomerMasterKeySpecEccNistP256 {
 		keyType = data.KeyTypeECDSA_SHA2_P256
 	} else {
 		return nil, fmt.Errorf("failed to import key from KMS, key spec %s is not supported, only key specs %s and %s are supported", spec,
-			kms.SigningAlgorithmSpecRsassaPssSha256, kms.SigningAlgorithmSpecRsassaPssSha256)
+			kms.CustomerMasterKeySpecRsa2048, kms.CustomerMasterKeySpecEccNistP256)
 	}
 
 	privateKeyHandle := &KmsPrivateKeyHandle{

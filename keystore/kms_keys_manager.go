@@ -1,6 +1,7 @@
 package keystore
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"github.com/aws/aws-sdk-go/aws"
@@ -16,47 +17,73 @@ import (
 	"sync"
 )
 
-type KmsKeysManager struct // implements KeysManager
+var _ KeysManager = &KmsKeysManager{}
+type KmsKeysManager struct
 {
-	dir 	           string
+	dir                string
 	entries            []KmsKeyEntry
 	entriesStorePath   string
 	loadKeyEntriesOnce sync.Once
+
+	initSessionOnce sync.Once
+	session         *session.Session
+
+	initKmsServiceOnce sync.Once
+	kmsService         *kms.KMS
+
+	initStsServiceOnce sync.Once
+	stsService         *sts.STS
 }
 
-type KmsPrivateKeyHandle struct // implements PrivateKeyHandle
+
+var _ PrivateKeyHandle = &KmsPrivateKeyHandle{}
+type KmsPrivateKeyHandle struct
 {
-	keyId   string
-	manager *KmsKeysManager
+	keyId 			 string
+	keyType          string
+	kmsExternalKeyId string
+	manager          *KmsKeysManager
 }
 
-type KmsPublicDataHandle struct // implements PublicDataHandle
+var _ Signer  = &KmsSigner{}
+type KmsSigner struct
 {
-	publicKey []byte
+	key     *KmsPrivateKeyHandle
 }
 
-func (k KmsPublicDataHandle) ID() string {
-	panic("implement me")
+type KmsKeyEntry struct {
+	KeyRole     string `json:"role"`
+	KeyType     string `json:"type"`
+	Arn         string `json:"arn"`
+	PublicKeyId string `json:"publicKeyId"`
 }
 
-func (k KmsPublicDataHandle) GetKey() *data.Key {
-	panic("implement me")
+func (h *KmsPrivateKeyHandle) ID() string {
+	return h.keyId
+}
+
+func (h *KmsPrivateKeyHandle) Type() string {
+	return h.keyType
+}
+
+func (h *KmsPrivateKeyHandle) GetSigner() (Signer, error) {
+	return &KmsSigner{key: h}, nil
 }
 
 func (h *KmsPrivateKeyHandle) GetPublicKey() (*data.Key, error) {
 
-	kmsService, _ := h.manager.getServices()
+	kmsService := h.manager.getKmsService()
 
 	input := &kms.GetPublicKeyInput{
-		KeyId:       &h.keyId,
+		KeyId:       &h.kmsExternalKeyId,
 	}
-	
+
 	output, err := kmsService.GetPublicKey(input)
 	if err != nil {
 		return nil, err
 	}
 	key := &data.Key{
-		Type:  data.KeyTypeECDSA_SHA2_P256,	// TODO
+		Type:  h.keyType,
 		Value: data.KeyValue{Public: output.PublicKey },
 	}
 
@@ -69,22 +96,35 @@ func NewKmsKeysManager(dir string) *KmsKeysManager {
 	return &KmsKeysManager{dir: dir, entriesStorePath: entriesStorePath, entries: []KmsKeyEntry{}}
 }
 
-func (m *KmsKeysManager) getServices() (*kms.KMS, *sts.STS) {
-	sess := session.Must(session.NewSession())
+func (m *KmsKeysManager) getSession() *session.Session {
 
-	region := "us-west-2"
-	sess.Config.Region = &region
-
-	kmsService := kms.New(sess)
-	stsService := sts.New(sess)
-
-	return kmsService, stsService
+	m.initSessionOnce.Do(func() {
+		m.session = session.Must(session.NewSession())
+		// TODO: unhardcode region
+		region := "us-west-2"
+		m.session.Config.Region = &region
+	})
+	return m.session
 }
 
+func (m *KmsKeysManager)getKmsService() *kms.KMS {
+	m.initKmsServiceOnce.Do(func() {
+		m.kmsService = kms.New(m.getSession())
+	})
+	return m.kmsService
+}
 
+func (m *KmsKeysManager)getStsService() *sts.STS {
+	m.initStsServiceOnce.Do(func() {
+		m.stsService = sts.New(m.getSession())
+	})
+	return m.stsService
+}
 
 func (m *KmsKeysManager) GenerateKey(keyRole string, keyType string) (PrivateKeyHandle, error) {
-	kmsService, stsService := m.getServices()
+	kmsService := m.getKmsService()
+	stsService := m.getStsService()
+
 	createKeyInput := &kms.CreateKeyInput{
 
 		Description: aws.String("This is TUF key for " + keyRole + " role."),
@@ -100,7 +140,17 @@ func (m *KmsKeysManager) GenerateKey(keyRole string, keyType string) (PrivateKey
 		},
 	}
 
-	customerMasterKeySec := kms.DataKeyPairSpecRsa2048
+	var customerMasterKeySec string
+	if keyType == data.KeyTypeECDSA_SHA2_P256 {
+		customerMasterKeySec = kms.DataKeyPairSpecEccNistP256
+	} else if keyType == data.KeyTypeRSASSA_PSS_SHA256 {
+		customerMasterKeySec = kms.DataKeyPairSpecRsa2048
+	} else if keyType == data.KeyTypeEd25519 {
+		return nil, fmt.Errorf("KMS does not support keys of %s type, use either %s or %s", data.KeyTypeEd25519, data.KeyTypeECDSA_SHA2_P256, data.KeyTypeRSASSA_PSS_SHA256)
+	} else {
+		return nil, fmt.Errorf("unsupported type of key %s, use either %s or %s which are supported by KMS", keyType, data.KeyTypeECDSA_SHA2_P256, data.KeyTypeRSASSA_PSS_SHA256)
+	}
+
 	createKeyInput.CustomerMasterKeySpec = &customerMasterKeySec
 
 	keyUsageTypeSignVerify := kms.KeyUsageTypeSignVerify
@@ -192,12 +242,19 @@ func (m *KmsKeysManager) GenerateKey(keyRole string, keyType string) (PrivateKey
 	createKeyOutput, err := kmsService.CreateKey(createKeyInput)
 	if err != nil { return nil, err }
 
-	privateKeyHandle := &KmsPrivateKeyHandle{manager: m, keyId: *createKeyOutput.KeyMetadata.KeyId}
+	privateKeyHandle := &KmsPrivateKeyHandle{
+		manager: m,
+		kmsExternalKeyId: *createKeyOutput.KeyMetadata.KeyId,
+		keyType: keyType,
+	}
+
 	publicKey, err := privateKeyHandle.GetPublicKey()
 	if err != nil { return nil, err }
 
+	privateKeyHandle.keyId = publicKey.ID()
+
 	createInput := &kms.CreateAliasInput{
-		AliasName:   aws.String("alias/TUF_" + keyRole + "_" + string(publicKey.ID()[0:8])),
+		AliasName:   aws.String("alias/TUF_" + string(publicKey.ID()[0:8])),
 		TargetKeyId: createKeyOutput.KeyMetadata.KeyId,
 	}
 	_, err = kmsService.CreateAlias(createInput)
@@ -215,14 +272,19 @@ func (m *KmsKeysManager) GenerateKey(keyRole string, keyType string) (PrivateKey
 	_, err = kmsService.TagResource(tagInput)
 	if err != nil { return nil, err }
 
-	err = m.addKeyEntry(&KmsKeyEntry	{ Arn: *createKeyOutput.KeyMetadata.Arn, PublicKeyId:publicKey.ID() })
+	err = m.addKeyEntry(&KmsKeyEntry {
+		KeyRole: keyRole,
+		KeyType: keyType,
+		Arn: *createKeyOutput.KeyMetadata.Arn,
+		PublicKeyId: publicKey.ID(),
+	})
 	if err != nil { return nil, err }
 
 	return privateKeyHandle, nil
 }
 
-func (m *KmsKeysManager) ImportKey(externalKeyId string) (PrivateKeyHandle, error) {
-	kmsService, _ := m.getServices()
+func (m *KmsKeysManager) ImportKey(keyRole string, externalKeyId string) (PrivateKeyHandle, error) {
+	kmsService := m.getKmsService()
 
 	describeKeyInput := &kms.DescribeKeyInput{
 		KeyId: aws.String(externalKeyId),
@@ -231,19 +293,60 @@ func (m *KmsKeysManager) ImportKey(externalKeyId string) (PrivateKeyHandle, erro
 	describeKeyOutput, err := kmsService.DescribeKey(describeKeyInput)
 	if err != nil { return nil, err }
 
-	algorithms := describeKeyOutput.KeyMetadata.EncryptionAlgorithms
-	for _, algorithm := range algorithms {
-		fmt.Println(algorithm)
+	var keyType string
+	spec := *describeKeyOutput.KeyMetadata.CustomerMasterKeySpec
+	if spec == kms.SigningAlgorithmSpecRsassaPssSha256 {
+		keyType = data.KeyTypeRSASSA_PSS_SHA256
+	} else if spec == kms.SigningAlgorithmSpecRsassaPssSha256 {
+		keyType = data.KeyTypeECDSA_SHA2_P256
+	} else {
+		return nil, fmt.Errorf("failed to import key from KMS, key spec %s is not supported, only key specs %s and %s are supported", spec,
+			kms.SigningAlgorithmSpecRsassaPssSha256, kms.SigningAlgorithmSpecRsassaPssSha256)
 	}
 
-	privateKeyHandle := &KmsPrivateKeyHandle{manager: m, keyId: *describeKeyOutput.KeyMetadata.KeyId}
+	privateKeyHandle := &KmsPrivateKeyHandle{
+		manager: m,
+		kmsExternalKeyId: *describeKeyOutput.KeyMetadata.KeyId,
+		keyType: keyType,
+	}
+
 	publicKey, err := privateKeyHandle.GetPublicKey()
 	if err != nil { return nil, err }
 
-	err = m.addKeyEntry(&KmsKeyEntry	{ Arn: *describeKeyOutput.KeyMetadata.Arn, PublicKeyId:publicKey.ID() })
+	privateKeyHandle.keyId = publicKey.ID()
+
+	err = m.addKeyEntry(&KmsKeyEntry	{
+		KeyRole: keyRole,
+		KeyType: keyType,
+		Arn: *describeKeyOutput.KeyMetadata.Arn,
+		PublicKeyId:publicKey.ID(),
+	})
 	if err != nil { return nil, err }
 
 	return privateKeyHandle, nil
+}
+
+
+func (m *KmsKeysManager) GetPrivateKeyHandles(keyRole string) ([]PrivateKeyHandle, error) {
+	err := m.initKeyEntries()
+
+	if err != nil {
+		return nil, err
+	}
+	var result []PrivateKeyHandle
+	for _, entry := range m.entries {
+		if entry.KeyRole == keyRole {
+			handle := &KmsPrivateKeyHandle{
+				keyId:            entry.PublicKeyId,
+				keyType:          entry.KeyType,
+				kmsExternalKeyId: entry.Arn,
+				manager:          m,
+			}
+			result = append(result, handle)
+		}
+	}
+
+	return result, nil
 }
 
 func (m *KmsKeysManager) createDirs() error {
@@ -255,18 +358,23 @@ func (m *KmsKeysManager) createDirs() error {
 	return nil
 }
 
-func (m *KmsKeysManager) addKeyEntry(entry *KmsKeyEntry) error {
+func (m *KmsKeysManager) initKeyEntries() error {
 	var err error = nil
 	m.loadKeyEntriesOnce.Do(func() {
 		err = m.loadKeyEntries()
 	})
+	return err
+}
+
+func (m *KmsKeysManager) addKeyEntry(entry *KmsKeyEntry) error {
+	err := m.initKeyEntries()
 
 	if err != nil {
 		return err
 	}
 
 	for _, e := range m.entries {
-		if e.PublicKeyId == entry.PublicKeyId {
+		if e.PublicKeyId == entry.PublicKeyId && e.KeyRole == entry.KeyRole {
 			return nil
 		}
 	}
@@ -304,7 +412,33 @@ func (m *KmsKeysManager) loadKeyEntries() error {
 	return nil
 }
 
-type KmsKeyEntry struct {
-	Arn         string `json:"arn"`
-	PublicKeyId string `json:"publicKeyId"`
+func (s *KmsSigner) Sign(bytes []byte) ([]byte, error) {
+	kmsService := s.key.manager.getKmsService()
+
+	var algorithm string
+	var digest []byte
+	if s.key.keyType == data.KeyTypeRSASSA_PSS_SHA256{
+		algorithm = kms.SigningAlgorithmSpecRsassaPssSha256
+		d := sha256.Sum256(bytes)
+		digest = d[:]
+	} else if s.key.keyType == data.KeyTypeECDSA_SHA2_P256 {
+		algorithm = kms.SigningAlgorithmSpecEcdsaSha256
+		d := sha256.Sum256(bytes)
+		digest = d[:]
+	} else {
+		return nil, fmt.Errorf("cannot sign data, key type %s is not supported by KMS", s.key.keyType)
+	}
+
+	signInput := &kms.SignInput{
+		KeyId:            aws.String(s.key.kmsExternalKeyId),
+		Message:          digest,
+		MessageType:      aws.String(kms.MessageTypeDigest),
+		SigningAlgorithm: aws.String(algorithm),
+	}
+
+	signOutput, err := kmsService.Sign(signInput)
+
+	if err != nil { return nil, err }
+
+	return signOutput.Signature, nil
 }

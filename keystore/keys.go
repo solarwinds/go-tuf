@@ -1,16 +1,15 @@
-package sign
+package keystore
 
 import (
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"fmt"
-	"log"
-	"sync"
-
 	"github.com/flynn/go-tuf/data"
 	"golang.org/x/crypto/ed25519"
+	"log"
 )
 
 type PrivateKey struct {
@@ -32,7 +31,7 @@ func (k *PrivateKey) PublicData() *data.Key {
 
 func (k *PrivateKey) Signer() Signer {
 	if k.Type == data.KeyTypeEd25519 {
-		return &ed25519Signer{PrivateKey: ed25519.PrivateKey(k.Value.Private)}
+		return &ed25519Signer{privateKey: ed25519.PrivateKey(k.Value.Private)}
 	} else if k.Type == data.KeyTypeECDSA_SHA2_P256 {
 		privateKey, err := x509.ParseECPrivateKey(k.Value.Private)
 		if err != nil {
@@ -40,7 +39,7 @@ func (k *PrivateKey) Signer() Signer {
 			return nil
 		}
 
-		return &ecdsaSigner{PrivateKey: *privateKey}
+		return &ecdsaSigner{privateKey: *privateKey}
 	} else {
 		log.Printf("Unsupported key type %s. Cannot prepare signer.", k.Type)
 		return nil
@@ -96,46 +95,34 @@ func GenerateEd25519Key() (*PrivateKey, error) {
 }
 
 type ed25519Signer struct {
-	ed25519.PrivateKey
-
-	id     string
-	idOnce sync.Once
+	privateKey ed25519.PrivateKey
 }
 
 var _ Signer = &ed25519Signer{}
 
-func (s *ed25519Signer) ID() string {
-	s.idOnce.Do(func() { s.id = s.publicData().ID() })
-	return s.id
+func (s *ed25519Signer) Sign(data []byte) ([]byte, error) {
+	return s.privateKey.Sign(rand.Reader, data, crypto.Hash(0))
 }
 
 func (s *ed25519Signer) publicData() *data.Key {
 	return &data.Key{
 		Type:  data.KeyTypeEd25519,
-		Value: data.KeyValue{Public: []byte(s.PrivateKey.Public().(ed25519.PublicKey))},
+		Value: data.KeyValue{Public: []byte(s.privateKey.Public().(ed25519.PublicKey))},
 	}
 }
 
-func (s *ed25519Signer) Type() string {
-	return data.KeyTypeEd25519
+type ecdsaSigner struct {
+	privateKey ecdsa.PrivateKey
 }
 
-type ecdsaSigner struct {
-	ecdsa.PrivateKey
-
-	id     string
-	idOnce sync.Once
+func (s *ecdsaSigner) Sign(data []byte) ([]byte, error) {
+	return s.privateKey.Sign(rand.Reader, data, crypto.Hash(0))
 }
 
 var _ Signer = &ecdsaSigner{}
 
-func (s *ecdsaSigner) ID() string {
-	s.idOnce.Do(func() { s.id = s.publicData().ID() })
-	return s.id
-}
-
 func (s *ecdsaSigner) publicData() *data.Key {
-	publicKey := s.PrivateKey.Public().(*ecdsa.PublicKey)
+	publicKey := s.privateKey.Public().(*ecdsa.PublicKey)
 
 	x509PublicKey, _ := x509.MarshalPKIXPublicKey(publicKey)
 
@@ -143,8 +130,4 @@ func (s *ecdsaSigner) publicData() *data.Key {
 		Type:  data.KeyTypeECDSA_SHA2_P256,
 		Value: data.KeyValue{Public: x509PublicKey},
 	}
-}
-
-func (s *ecdsaSigner) Type() string {
-	return data.KeyTypeECDSA_SHA2_P256
 }

@@ -8,11 +8,18 @@ type KeysManager interface
 	GenerateKey(keyRole string, keyType string) (PrivateKeyHandle, error)
 
 	// Imports an existing key from the key manager
-	ImportKey(id string) (PrivateKeyHandle, error)
+	ImportKey(keyRole string, externalKeyId string) (PrivateKeyHandle, error)
+
+	GetPrivateKeyHandles(keyRole string) ([]PrivateKeyHandle, error)
+
+	//Sign()
 }
 
 type PrivateKeyHandle interface {
+	ID() string
+	Type() string
 	GetPublicKey() (*data.Key, error)
+	GetSigner() (Signer, error)
 }
 
 const (

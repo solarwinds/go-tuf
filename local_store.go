@@ -3,6 +3,7 @@ package tuf
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/flynn/go-tuf/keystore"
 	"io"
 	"io/ioutil"
 	"os"
@@ -10,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/flynn/go-tuf/data"
-	"github.com/flynn/go-tuf/sign"
 	"github.com/flynn/go-tuf/util"
 )
 
@@ -21,14 +21,14 @@ func MemoryStore(meta map[string]json.RawMessage, files map[string][]byte) Local
 	return &memoryStore{
 		meta:    meta,
 		files:   files,
-		signers: make(map[string][]sign.Signer),
+		signers: make(map[string][]keystore.Signer),
 	}
 }
 
 type memoryStore struct {
 	meta    map[string]json.RawMessage
 	files   map[string][]byte
-	signers map[string][]sign.Signer
+	signers map[string][]keystore.Signer
 }
 
 func (m *memoryStore) GetMeta() (map[string]json.RawMessage, error) {
@@ -66,11 +66,11 @@ func (m *memoryStore) Commit(map[string]json.RawMessage, bool, map[string]data.H
 	return nil
 }
 
-func (m *memoryStore) GetSigningKeys(role string) ([]sign.Signer, error) {
+func (m *memoryStore) GetSigningKeys(role string) ([]keystore.Signer, error) {
 	return m.signers[role], nil
 }
 
-func (m *memoryStore) SavePrivateKey(role string, key *sign.PrivateKey) error {
+func (m *memoryStore) SavePrivateKey(role string, key *keystore.PrivateKey) error {
 	m.signers[role] = append(m.signers[role], key.Signer())
 	return nil
 }

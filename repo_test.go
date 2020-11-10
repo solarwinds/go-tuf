@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/flynn/go-tuf/keystore"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -12,7 +13,6 @@ import (
 
 	"github.com/flynn/go-tuf/data"
 	"github.com/flynn/go-tuf/encrypted"
-	"github.com/flynn/go-tuf/sign"
 	"github.com/flynn/go-tuf/util"
 	"github.com/flynn/go-tuf/verify"
 	"golang.org/x/crypto/ed25519"
@@ -322,7 +322,7 @@ func (RepoSuite) TestSign(c *C) {
 	}
 
 	// signing with an available key generates a signature
-	key, err := sign.GenerateEd25519Key()
+	key, err := keystore.GenerateEd25519Key()
 	c.Assert(err, IsNil)
 	c.Assert(local.SavePrivateKey("root", key), IsNil)
 	c.Assert(r.Sign("root.json"), IsNil)
@@ -333,7 +333,7 @@ func (RepoSuite) TestSign(c *C) {
 	checkSigIDs(key.PublicData().ID())
 
 	// signing with a new available key generates another signature
-	newKey, err := sign.GenerateEd25519Key()
+	newKey, err := keystore.GenerateEd25519Key()
 	c.Assert(err, IsNil)
 	c.Assert(local.SavePrivateKey("root", newKey), IsNil)
 	c.Assert(r.Sign("root.json"), IsNil)
@@ -762,13 +762,13 @@ func (RepoSuite) TestKeyPersistence(c *C) {
 	passphrase := []byte("s3cr3t")
 	store := FileSystemStore(tmp.path, testPassphraseFunc(passphrase))
 
-	assertKeys := func(role string, enc bool, expected []*sign.PrivateKey) {
+	assertKeys := func(role string, enc bool, expected []*keystore.PrivateKey) {
 		keysJSON := tmp.readFile("keys/" + role + ".json")
 		pk := &persistedKeys{}
 		c.Assert(json.Unmarshal(keysJSON, pk), IsNil)
 
 		// check the persisted keys are correct
-		var actual []*sign.PrivateKey
+		var actual []*keystore.PrivateKey
 		if enc {
 			c.Assert(pk.Encrypted, Equals, true)
 			decrypted, err := encrypted.Decrypt(pk.Data, passphrase)
@@ -793,28 +793,28 @@ func (RepoSuite) TestKeyPersistence(c *C) {
 	}
 
 	// save a key and check it gets encrypted
-	key, err := sign.GenerateEd25519Key()
+	key, err := keystore.GenerateEd25519Key()
 	c.Assert(err, IsNil)
 	c.Assert(store.SavePrivateKey("root", key), IsNil)
-	assertKeys("root", true, []*sign.PrivateKey{key})
+	assertKeys("root", true, []*keystore.PrivateKey{key})
 
 	// save another key and check it gets added to the existing keys
-	newKey, err := sign.GenerateEd25519Key()
+	newKey, err := keystore.GenerateEd25519Key()
 	c.Assert(err, IsNil)
 	c.Assert(store.SavePrivateKey("root", newKey), IsNil)
-	assertKeys("root", true, []*sign.PrivateKey{key, newKey})
+	assertKeys("root", true, []*keystore.PrivateKey{key, newKey})
 
 	// check saving a key to an encrypted file without a passphrase fails
 	insecureStore := FileSystemStore(tmp.path, nil)
-	key, err = sign.GenerateEd25519Key()
+	key, err = keystore.GenerateEd25519Key()
 	c.Assert(err, IsNil)
 	c.Assert(insecureStore.SavePrivateKey("root", key), Equals, ErrPassphraseRequired{"root"})
 
 	// save a key to an insecure store and check it is not encrypted
-	key, err = sign.GenerateEd25519Key()
+	key, err = keystore.GenerateEd25519Key()
 	c.Assert(err, IsNil)
 	c.Assert(insecureStore.SavePrivateKey("targets", key), IsNil)
-	assertKeys("targets", false, []*sign.PrivateKey{key})
+	assertKeys("targets", false, []*keystore.PrivateKey{key})
 }
 
 func (RepoSuite) TestManageMultipleTargets(c *C) {

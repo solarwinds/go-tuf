@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/flynn/go-tuf/keystore"
+	cjson "github.com/tent/canonical-json-go"
 	"io"
 	"path"
 	"strings"
 	"time"
 
 	"github.com/flynn/go-tuf/data"
-	"github.com/flynn/go-tuf/sign"
 	"github.com/flynn/go-tuf/util"
 	"github.com/flynn/go-tuf/verify"
 )
@@ -48,7 +48,7 @@ type LocalStore interface {
 	WalkStagedTargets(paths []string, targetsFn targetsWalkFunc) error
 
 	Commit(map[string]json.RawMessage, bool, map[string]data.Hashes) error
-	//GetSigningKeys(string) ([]sign.Signer, error)
+	//GetSigningKeys(string) ([]keystore.Signer, error)
 	//SavePrivateKey(string, *sign.PrivateKey) error
 	Clean() error
 }
@@ -229,7 +229,7 @@ func (r *Repo) installKey(key keystore.PrivateKeyHandle, keyRole string, expires
 	return pk.ID(), r.setMeta("root.json", root)
 }
 
-func (r *Repo) ImportKeyWithExpires(keyId string, keyRole string, expires time.Time) (string, error) {
+func (r *Repo) ImportKeyWithExpires(externalKeyId string, keyRole string, expires time.Time) (string, error) {
 	if !verify.ValidRole(keyRole) {
 		return "", ErrInvalidRole{keyRole}
 	}
@@ -238,7 +238,7 @@ func (r *Repo) ImportKeyWithExpires(keyId string, keyRole string, expires time.T
 		return "", ErrInvalidExpires{expires}
 	}
 
-	key, err := r.manager.ImportKey(keyId)
+	key, err := r.manager.ImportKey(keyRole, externalKeyId)
 	if err != nil {
 		return "", err
 	}
@@ -246,8 +246,8 @@ func (r *Repo) ImportKeyWithExpires(keyId string, keyRole string, expires time.T
 	return r.installKey(key, keyRole, expires)
 }
 
-func (r *Repo) ImportKey(keyId string, keyRole string) (string, error) {
-	return r.ImportKeyWithExpires(keyId, keyRole, data.DefaultExpires("root"))
+func (r *Repo) ImportKey(externalKeyId string, keyRole string) (string, error) {
+	return r.ImportKeyWithExpires(externalKeyId, keyRole, data.DefaultExpires("root"))
 }
 
 func validExpires(expires time.Time) bool {
@@ -326,7 +326,7 @@ func (r *Repo) setMeta(name string, meta interface{}) error {
 	if err != nil {
 		return err
 	}
-	s, err := sign.Marshal(meta, keys...)
+	s, err := r.Marshal(meta, keys...)
 	if err != nil {
 		return err
 	}
@@ -357,7 +357,7 @@ func (r *Repo) Sign(name string) error {
 		return ErrInsufficientKeys{name}
 	}
 	for _, k := range keys {
-		sign.Sign(s, k)
+		r.SignData(s, k)
 	}
 
 	b, err := json.Marshal(s)
@@ -374,35 +374,38 @@ func (r *Repo) Sign(name string) error {
 // been revoked are omitted), except for the root role in which case all local
 // keys are returned (revoked root keys still need to sign new root metadata so
 // clients can verify the new root.json and update their keys db accordingly).
-func (r *Repo) getSigningKeys(name string) ([]sign.Signer, error) {
-	//TODO: impl me
-	//signingKeys, err := r.local.GetSigningKeys(name)
-	//if err != nil {
-	//	return nil, err
-	//}
-	//if name == "root" {
-	//	return signingKeys, nil
-	//}
-	//db, err := r.db()
-	//if err != nil {
-	//	return nil, err
-	//}
-	//role := db.GetRole(name)
-	//if role == nil {
-	//	return nil, nil
-	//}
-	//if len(role.KeyIDs) == 0 {
-	//	return nil, nil
-	//}
-	//keys := make([]sign.Signer, 0, len(role.KeyIDs))
-	//for _, key := range signingKeys {
-	//	if _, ok := role.KeyIDs[key.ID()]; ok {
-	//		keys = append(keys, key)
-	//	}
-	//}
-	//return keys, nil
+func (r *Repo) getSigningKeys(keyRole string) ([]keystore.PrivateKeyHandle, error) {
 
-	return nil, nil
+	keys, err := r.manager.GetPrivateKeyHandles(keyRole)
+	if err != nil { return nil, err }
+
+	if err != nil {
+		return nil, err
+	}
+	if keyRole == "root" {
+		return keys, nil
+	}
+	db, err := r.db()
+	if err != nil {
+		return nil, err
+	}
+	role := db.GetRole(keyRole)
+	if role == nil {
+		return nil, nil
+	}
+	if len(role.KeyIDs) == 0 {
+		return nil, nil
+	}
+
+	keys = make([]keystore.PrivateKeyHandle, 0, len(role.KeyIDs))
+	for _, key := range keys {
+		publicKey, err := key.GetPublicKey()
+		if err != nil { return nil, err }
+		if _, ok := role.KeyIDs[publicKey.ID()]; ok {
+			keys = append(keys, key)
+		}
+	}
+	return keys, nil
 }
 
 func (r *Repo) signedMeta(name string) (*data.Signed, error) {
@@ -703,3 +706,44 @@ func (r *Repo) fileMeta(name string) (data.FileMeta, error) {
 }
 
 
+func (r *Repo) SignData(s *data.Signed, k keystore.PrivateKeyHandle) error {
+	id := k.ID()
+	signatures := make([]data.Signature, 0, len(s.Signatures)+1)
+	for _, sig := range s.Signatures {
+		if sig.KeyID == id {
+			continue
+		}
+		signatures = append(signatures, sig)
+	}
+
+	signer, err := k.GetSigner()
+	if err != nil { return err }
+	sig, err := signer.Sign(s.Signed)
+
+	if err != nil {
+		return err
+	}
+
+	s.Signatures = append(signatures, data.Signature{
+		KeyID:     id,
+		Method:    k.Type(),
+		Signature: sig,
+	})
+
+	return nil
+}
+
+func (r *Repo)Marshal(v interface{}, keys ...keystore.PrivateKeyHandle) (*data.Signed, error) {
+	b, err := cjson.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	s := &data.Signed{Signed: b}
+	for _, k := range keys {
+		if err := r.SignData(s, k); err != nil {
+			return nil, err
+		}
+
+	}
+	return s, nil
+}

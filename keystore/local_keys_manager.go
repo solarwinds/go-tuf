@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/flynn/go-tuf/data"
 	"github.com/flynn/go-tuf/encrypted"
-	"github.com/flynn/go-tuf/sign"
 	"github.com/flynn/go-tuf/util"
 	"io/ioutil"
 	"os"
@@ -19,13 +18,28 @@ type LocalKeysManager struct // implements KeysManager
 	passphraseFunc util.PassphraseFunc
 
 	// signers is a cache of persisted keys to avoid decrypting multiple times
-	signers map[string][]sign.Signer
+	signers map[string][]Signer
 }
+
 
 
 type LocalPrivateKeyHandle struct // implements PrivateKeyHandle
 {
-	privateKey *sign.PrivateKey
+	keyId      string
+	keyType    string
+	privateKey *PrivateKey
+}
+
+func (l *LocalPrivateKeyHandle) ID() string {
+	return l.keyId
+}
+
+func (l *LocalPrivateKeyHandle) Type() string {
+	return l.keyType
+}
+
+func (l *LocalPrivateKeyHandle) GetSigner() (Signer, error) {
+	return l.privateKey.Signer(), nil
 }
 
 type persistedKeys struct {
@@ -45,12 +59,20 @@ func NewLocalKeysManager(dir string, passphraseFunc util.PassphraseFunc) *LocalK
 	return &LocalKeysManager{
 		dir:            dir,
 		passphraseFunc: passphraseFunc,
-		signers:        make(map[string][]sign.Signer),
+		signers:        make(map[string][]Signer),
 	}
 }
 
+func (m *LocalKeysManager) ImportKey(keyRole string, externalKeyId string) (PrivateKeyHandle, error) {
+	return nil, fmt.Errorf("local key manager does not support key import, use gen-key instead")
+}
+
+func (m *LocalKeysManager) GetPrivateKeyHandles(keyRole string) ([]PrivateKeyHandle, error) {
+	panic("implement me")
+}
+
 func (m *LocalKeysManager) GenerateKey(keyRole string, keyType string) (PrivateKeyHandle, error) {
-	privateKey, err := sign.GenerateKey(keyType)
+	privateKey, err := GenerateKey(keyType)
 	if err != nil {
 		return nil, err
 	}
@@ -59,15 +81,12 @@ func (m *LocalKeysManager) GenerateKey(keyRole string, keyType string) (PrivateK
 		return nil, err
 	}
 
-	return &LocalPrivateKeyHandle{ privateKey: privateKey }, nil
+	keyId := privateKey.PublicData().ID()
+
+	return &LocalPrivateKeyHandle{ privateKey: privateKey, keyId: keyId, keyType: keyType }, nil
 }
 
-
-func (m *LocalKeysManager) ImportKey(id string) (PrivateKeyHandle, error) {
-	return nil, fmt.Errorf("local key manager does not support key import, use gen-key instead")
-}
-
-func (m *LocalKeysManager) SavePrivateKey(role string, key *sign.PrivateKey) error {
+func (m *LocalKeysManager) SavePrivateKey(role string, key *PrivateKey) error {
 	if err := m.createDirs(); err != nil {
 		return err
 	}
@@ -115,7 +134,7 @@ func (m *LocalKeysManager) SavePrivateKey(role string, key *sign.PrivateKey) err
 }
 
 
-func (m *LocalKeysManager) GetSigningKeys(role string) ([]sign.Signer, error) {
+func (m *LocalKeysManager) GetSigningKeys(role string) ([]Signer, error) {
 	if keys, ok := m.signers[role]; ok {
 		return keys, nil
 	}
@@ -131,8 +150,8 @@ func (m *LocalKeysManager) GetSigningKeys(role string) ([]sign.Signer, error) {
 }
 
 
-func (m *LocalKeysManager) privateKeySigners(keys []*sign.PrivateKey) []sign.Signer {
-	res := make([]sign.Signer, len(keys))
+func (m *LocalKeysManager) privateKeySigners(keys []*PrivateKey) []Signer {
+	res := make([]Signer, len(keys))
 	for i, k := range keys {
 		res[i] = k.Signer()
 	}
@@ -141,7 +160,7 @@ func (m *LocalKeysManager) privateKeySigners(keys []*sign.PrivateKey) []sign.Sig
 
 // loadKeys loads keys for the given role and returns them along with the
 // passphrase (if read) so that callers don't need to re-read it.
-func (m *LocalKeysManager) loadKeys(role string) ([]*sign.PrivateKey, []byte, error) {
+func (m *LocalKeysManager) loadKeys(role string) ([]*PrivateKey, []byte, error) {
 	file, err := os.Open(m.keysPath(role))
 	if err != nil {
 		return nil, nil, err
@@ -153,7 +172,7 @@ func (m *LocalKeysManager) loadKeys(role string) ([]*sign.PrivateKey, []byte, er
 		return nil, nil, err
 	}
 
-	var keys []*sign.PrivateKey
+	var keys []*PrivateKey
 	if !pk.Encrypted {
 		if err := json.Unmarshal(pk.Data, &keys); err != nil {
 			return nil, nil, err

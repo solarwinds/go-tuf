@@ -300,7 +300,7 @@ func (m *KmsKeysManager) ImportKey(keyRole string, externalKeyId string) (Privat
 	} else if spec == kms.CustomerMasterKeySpecEccNistP256 {
 		keyType = data.KeyTypeECDSA_SHA2_P256
 	} else {
-		return nil, fmt.Errorf("failed to import key from KMS, key spec %s is not supported, only key specs %s and %s are supported", spec,
+		return nil, fmt.Errorf("failed to import the key from KMS, key spec %s is not supported, only key specs %s and %s are supported", spec,
 			kms.CustomerMasterKeySpecRsa2048, kms.CustomerMasterKeySpecEccNistP256)
 	}
 

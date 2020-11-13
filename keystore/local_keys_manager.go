@@ -11,35 +11,23 @@ import (
 	"path/filepath"
 )
 
-type LocalKeysManager struct // implements KeysManager
+var _ KeysManager = &LocalKeysManager{}
+type LocalKeysManager struct
 {
 	dir            string
 
 	passphraseFunc util.PassphraseFunc
 
-	// signers is a cache of persisted keys to avoid decrypting multiple times
-	signers map[string][]Signer
+	// keys is a cache of persisted keys to avoid decrypting multiple times
+	keys map[string /*role*/][]PrivateKeyHandle
 }
 
-
-
-type LocalPrivateKeyHandle struct // implements PrivateKeyHandle
+var _ PrivateKeyHandle = &LocalPrivateKeyHandle{}
+type LocalPrivateKeyHandle struct
 {
 	keyId      string
 	keyType    string
 	privateKey *PrivateKey
-}
-
-func (l *LocalPrivateKeyHandle) ID() string {
-	return l.keyId
-}
-
-func (l *LocalPrivateKeyHandle) Type() string {
-	return l.keyType
-}
-
-func (l *LocalPrivateKeyHandle) GetSigner() (Signer, error) {
-	return l.privateKey.Signer(), nil
 }
 
 type persistedKeys struct {
@@ -59,7 +47,7 @@ func NewLocalKeysManager(dir string, passphraseFunc util.PassphraseFunc) *LocalK
 	return &LocalKeysManager{
 		dir:            dir,
 		passphraseFunc: passphraseFunc,
-		signers:        make(map[string][]Signer),
+		keys:        make(map[string][]PrivateKeyHandle),
 	}
 }
 
@@ -68,99 +56,86 @@ func (m *LocalKeysManager) ImportKey(keyRole string, externalKeyId string) (Priv
 }
 
 func (m *LocalKeysManager) GetPrivateKeyHandles(keyRole string) ([]PrivateKeyHandle, error) {
-	panic("implement me")
-}
-
-func (m *LocalKeysManager) GenerateKey(keyRole string, keyType string) (PrivateKeyHandle, error) {
-	privateKey, err := GenerateKey(keyType)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := m.SavePrivateKey(keyRole, privateKey); err != nil {
-		return nil, err
-	}
-
-	keyId := privateKey.PublicData().ID()
-
-	return &LocalPrivateKeyHandle{ privateKey: privateKey, keyId: keyId, keyType: keyType }, nil
-}
-
-func (m *LocalKeysManager) SavePrivateKey(role string, key *PrivateKey) error {
-	if err := m.createDirs(); err != nil {
-		return err
-	}
-
-	// add the key to the existing keys (if any)
-	keys, pass, err := m.loadKeys(role)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	keys = append(keys, key)
-
-	// if loadKeys didn't return a passphrase (because no keys yet exist)
-	// and passphraseFunc is set, get the passphrase so the keys file can
-	// be encrypted later (passphraseFunc being nil indicates the keys file
-	// should not be encrypted)
-	if pass == nil && m.passphraseFunc != nil {
-		pass, err = m.passphraseFunc(role, true)
-		if err != nil {
-			return err
-		}
-	}
-
-	pk := &persistedKeys{}
-	if pass != nil {
-		pk.Data, err = encrypted.Marshal(keys, pass)
-		if err != nil {
-			return err
-		}
-		pk.Encrypted = true
-	} else {
-		pk.Data, err = json.MarshalIndent(keys, "", "\t")
-		if err != nil {
-			return err
-		}
-	}
-	data, err := json.MarshalIndent(pk, "", "\t")
-	if err != nil {
-		return err
-	}
-	if err := ioutil.WriteFile(m.keysPath(role), append(data, '\n'), 0600); err != nil {
-		return err
-	}
-	m.signers[role] = m.privateKeySigners(keys)
-	return nil
-}
-
-
-func (m *LocalKeysManager) GetSigningKeys(role string) ([]Signer, error) {
-	if keys, ok := m.signers[role]; ok {
+	if keys, ok := m.keys[keyRole]; ok {
 		return keys, nil
 	}
-	keys, _, err := m.loadKeys(role)
+	privateKeys, _, err := m.loadPrivateKeys(keyRole)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	m.signers[role] = m.privateKeySigners(keys)
-	return m.signers[role], nil
+
+	handles := m.createPrivateKeyHandles(privateKeys)
+	m.keys[keyRole] = handles
+
+	return handles, nil
 }
 
-
-func (m *LocalKeysManager) privateKeySigners(keys []*PrivateKey) []Signer {
-	res := make([]Signer, len(keys))
-	for i, k := range keys {
-		res[i] = k.Signer()
+func (m *LocalKeysManager) GenerateKey(keyRole string, keyType string) (PrivateKeyHandle, error) {
+	privateKeyHandle, err := GenerateKey(keyType)
+	if err != nil {
+		return nil, err
 	}
-	return res
+
+	if err := m.SavePrivateKey(keyRole, privateKeyHandle); err != nil {
+		return nil, err
+	}
+
+	keyId := privateKeyHandle.PublicData().ID()
+
+	return &LocalPrivateKeyHandle{ privateKey: privateKeyHandle, keyId: keyId, keyType: keyType }, nil
 }
 
-// loadKeys loads keys for the given role and returns them along with the
+func (m *LocalKeysManager) SavePrivateKey(keyRole string, privateKey *PrivateKey) error {
+	if err := m.createDirs(); err != nil {
+		return err
+	}
+
+	// add the key to the existing keys (if any)
+	privateKeys, pass, err := m.loadPrivateKeys(keyRole)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+
+	privateKeys = append(privateKeys, privateKey)
+
+	// if loadPrivateKeys didn't return a passphrase (because no keys yet exist)
+	// and passphraseFunc is set, get the passphrase so the keys file can
+	// be encrypted later (passphraseFunc being nil indicates the keys file
+	// should not be encrypted)
+	if pass == nil && m.passphraseFunc != nil {
+		pass, err = m.passphraseFunc(keyRole, true)
+		if err != nil {
+			return err
+		}
+	}
+
+	m.savePrivateKeys(privateKeys, pass, keyRole)
+
+	handles := m.createPrivateKeyHandles(privateKeys)
+	m.keys[keyRole] = handles
+
+	return nil
+}
+
+func (m *LocalKeysManager) createPrivateKeyHandles(privateKeys []*PrivateKey) []PrivateKeyHandle {
+	var handles []PrivateKeyHandle
+	for _, k := range privateKeys {
+		h := &LocalPrivateKeyHandle{
+			keyId:      k.PublicData().ID(),
+			keyType:    k.Type,
+			privateKey: k,
+		}
+		handles = append(handles, h)
+	}
+	return handles
+}
+
+// loadPrivateKeys loads keys for the given role and returns them along with the
 // passphrase (if read) so that callers don't need to re-read it.
-func (m *LocalKeysManager) loadKeys(role string) ([]*PrivateKey, []byte, error) {
+func (m *LocalKeysManager) loadPrivateKeys(role string) ([]*PrivateKey, []byte, error) {
 	file, err := os.Open(m.keysPath(role))
 	if err != nil {
 		return nil, nil, err
@@ -172,27 +147,54 @@ func (m *LocalKeysManager) loadKeys(role string) ([]*PrivateKey, []byte, error) 
 		return nil, nil, err
 	}
 
-	var keys []*PrivateKey
+	var privateKeys []*PrivateKey
+	var pass []byte
 	if !pk.Encrypted {
-		if err := json.Unmarshal(pk.Data, &keys); err != nil {
+		if err := json.Unmarshal(pk.Data, &privateKeys); err != nil {
 			return nil, nil, err
 		}
-		return keys, nil, nil
+
+	} else {
+		// the keys are encrypted so cannot be loaded if passphraseFunc is not set
+		if m.passphraseFunc == nil {
+			return nil, nil, ErrPassphraseRequired{role}
+		}
+
+		pass, err = m.passphraseFunc(role, false)
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := encrypted.Unmarshal(pk.Data, &privateKeys, pass); err != nil {
+			return nil, nil, err
+		}
 	}
 
-	// the keys are encrypted so cannot be loaded if passphraseFunc is not set
-	if m.passphraseFunc == nil {
-		return nil, nil, ErrPassphraseRequired{role}
-	}
+	return privateKeys, pass, nil
+}
 
-	pass, err := m.passphraseFunc(role, false)
+func (m *LocalKeysManager) savePrivateKeys(privateKeys []*PrivateKey, pass []byte, keyRole string) error {
+	pk := &persistedKeys{}
+	var err error
+	if pass != nil {
+		pk.Data, err = encrypted.Marshal(privateKeys, pass)
+		if err != nil {
+			return err
+		}
+		pk.Encrypted = true
+	} else {
+		pk.Data, err = json.MarshalIndent(privateKeys, "", "\t")
+		if err != nil {
+			return err
+		}
+	}
+	data, err := json.MarshalIndent(pk, "", "\t")
 	if err != nil {
-		return nil, nil, err
+		return err
 	}
-	if err := encrypted.Unmarshal(pk.Data, &keys, pass); err != nil {
-		return nil, nil, err
+	if err := ioutil.WriteFile(m.keysPath(keyRole), append(data, '\n'), 0600); err != nil {
+		return err
 	}
-	return keys, pass, nil
+	return nil
 }
 
 func (m *LocalKeysManager) keysPath(role string) string {
@@ -208,6 +210,20 @@ func (m *LocalKeysManager) createDirs() error {
 	return nil
 }
 
-func (l LocalPrivateKeyHandle) GetPublicKey() (*data.Key, error) {
+
+
+func (l *LocalPrivateKeyHandle) GetPublicKey() (*data.Key, error) {
 	return l.privateKey.PublicData(), nil
+}
+
+func (l *LocalPrivateKeyHandle) ID() string {
+	return l.keyId
+}
+
+func (l *LocalPrivateKeyHandle) Type() string {
+	return l.keyType
+}
+
+func (l *LocalPrivateKeyHandle) GetSigner() (Signer, error) {
+	return l.privateKey.Signer(), nil
 }

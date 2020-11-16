@@ -39,7 +39,9 @@ var snapshotManifests = []string{
 type targetsWalkFunc func(path string, target io.Reader) error
 
 type LocalStore interface {
+
 	GetMeta() (map[string]json.RawMessage, error)
+
 	SetMeta(string, json.RawMessage) error
 
 	// WalkStagedTargets calls targetsFn for each staged target file in paths.
@@ -48,8 +50,7 @@ type LocalStore interface {
 	WalkStagedTargets(paths []string, targetsFn targetsWalkFunc) error
 
 	Commit(map[string]json.RawMessage, bool, map[string]data.Hashes) error
-	//GetSigningKeys(string) ([]keystore.Signer, error)
-	//SavePrivateKey(string, *sign.PrivateKey) error
+
 	Clean() error
 }
 

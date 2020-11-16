@@ -30,7 +30,7 @@ type LocalPrivateKeyHandle struct
 	privateKey *PrivateKey
 }
 
-type persistedKeys struct {
+type PersistedKeys struct {
 	Encrypted bool            `json:"encrypted"`
 	Data      json.RawMessage `json:"data"`
 }
@@ -74,18 +74,18 @@ func (m *LocalKeysManager) GetPrivateKeyHandles(keyRole string) ([]PrivateKeyHan
 }
 
 func (m *LocalKeysManager) GenerateKey(keyRole string, keyType string) (PrivateKeyHandle, error) {
-	privateKeyHandle, err := GenerateKey(keyType)
+	privateKey, err := GenerateKey(keyType)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := m.SavePrivateKey(keyRole, privateKeyHandle); err != nil {
+	if err := m.SavePrivateKey(keyRole, privateKey); err != nil {
 		return nil, err
 	}
 
-	keyId := privateKeyHandle.PublicData().ID()
+	keyId := privateKey.PublicData().ID()
 
-	return &LocalPrivateKeyHandle{ privateKey: privateKeyHandle, keyId: keyId, keyType: keyType }, nil
+	return &LocalPrivateKeyHandle{ privateKey: privateKey, keyId: keyId, keyType: keyType }, nil
 }
 
 func (m *LocalKeysManager) SavePrivateKey(keyRole string, privateKey *PrivateKey) error {
@@ -142,7 +142,7 @@ func (m *LocalKeysManager) loadPrivateKeys(role string) ([]*PrivateKey, []byte, 
 	}
 	defer file.Close()
 
-	pk := &persistedKeys{}
+	pk := &PersistedKeys{}
 	if err := json.NewDecoder(file).Decode(pk); err != nil {
 		return nil, nil, err
 	}
@@ -173,7 +173,7 @@ func (m *LocalKeysManager) loadPrivateKeys(role string) ([]*PrivateKey, []byte, 
 }
 
 func (m *LocalKeysManager) savePrivateKeys(privateKeys []*PrivateKey, pass []byte, keyRole string) error {
-	pk := &persistedKeys{}
+	pk := &PersistedKeys{}
 	var err error
 	if pass != nil {
 		pk.Data, err = encrypted.Marshal(privateKeys, pass)

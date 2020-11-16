@@ -25,6 +25,7 @@ func MemoryStore(meta map[string]json.RawMessage, files map[string][]byte) Local
 	}
 }
 
+var _ LocalStore = &memoryStore{}
 type memoryStore struct {
 	meta    map[string]json.RawMessage
 	files   map[string][]byte
@@ -66,20 +67,9 @@ func (m *memoryStore) Commit(map[string]json.RawMessage, bool, map[string]data.H
 	return nil
 }
 
-func (m *memoryStore) GetSigningKeys(role string) ([]keystore.Signer, error) {
-	return m.signers[role], nil
-}
-
-func (m *memoryStore) SavePrivateKey(role string, key *keystore.PrivateKey) error {
-	m.signers[role] = append(m.signers[role], key.Signer())
-	return nil
-}
-
 func (m *memoryStore) Clean() error {
 	return nil
 }
-
-
 
 func FileSystemStore(dir string) LocalStore {
 	return &fileSystemStore{

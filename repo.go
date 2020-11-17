@@ -377,14 +377,14 @@ func (r *Repo) Sign(name string) error {
 // clients can verify the new root.json and update their keys db accordingly).
 func (r *Repo) getSigningKeys(keyRole string) ([]keystore.PrivateKeyHandle, error) {
 
-	keys, err := r.manager.GetPrivateKeyHandles(keyRole)
+	privateKeys, err := r.manager.GetPrivateKeyHandles(keyRole)
 	if err != nil { return nil, err }
 
 	if err != nil {
 		return nil, err
 	}
 	if keyRole == "root" {
-		return keys, nil
+		return privateKeys, nil
 	}
 	db, err := r.db()
 	if err != nil {
@@ -398,8 +398,8 @@ func (r *Repo) getSigningKeys(keyRole string) ([]keystore.PrivateKeyHandle, erro
 		return nil, nil
 	}
 
-	keys = make([]keystore.PrivateKeyHandle, 0, len(role.KeyIDs))
-	for _, key := range keys {
+	keys := make([]keystore.PrivateKeyHandle, 0, len(role.KeyIDs))
+	for _, key := range privateKeys {
 		publicKey, err := key.GetPublicKey()
 		if err != nil { return nil, err }
 		if _, ok := role.KeyIDs[publicKey.ID()]; ok {

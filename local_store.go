@@ -3,7 +3,6 @@ package tuf
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/flynn/go-tuf/keystore"
 	"io"
 	"io/ioutil"
 	"os"
@@ -21,7 +20,6 @@ func MemoryStore(meta map[string]json.RawMessage, files map[string][]byte) Local
 	return &memoryStore{
 		meta:    meta,
 		files:   files,
-		signers: make(map[string][]keystore.Signer),
 	}
 }
 
@@ -29,7 +27,6 @@ var _ LocalStore = &memoryStore{}
 type memoryStore struct {
 	meta    map[string]json.RawMessage
 	files   map[string][]byte
-	signers map[string][]keystore.Signer
 }
 
 func (m *memoryStore) GetMeta() (map[string]json.RawMessage, error) {

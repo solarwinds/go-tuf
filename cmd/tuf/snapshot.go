@@ -7,7 +7,7 @@ import (
 
 func init() {
 	register("snapshot", cmdSnapshot, `
-usage: tuf snapshot [--expires=<days>] [--compression=<format>]
+usage: tuf snapshot [--expires=<days> --manager=<type>] [--compression=<format>]
 
 Update the snapshot manifest.
 

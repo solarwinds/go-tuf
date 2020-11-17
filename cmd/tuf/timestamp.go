@@ -7,7 +7,7 @@ import (
 
 func init() {
 	register("timestamp", cmdTimestamp, `
-usage: tuf timestamp [--expires=<days>]
+usage: tuf timestamp [--expires=<days> --manager=<type>]
 
 Update the timestamp manifest.
 

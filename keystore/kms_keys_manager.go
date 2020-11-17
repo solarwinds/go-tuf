@@ -1,7 +1,10 @@
 package keystore
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"github.com/aws/aws-sdk-go/aws"
@@ -13,6 +16,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 )
@@ -79,12 +83,27 @@ func (h *KmsPrivateKeyHandle) GetPublicKey() (*data.Key, error) {
 	}
 
 	output, err := kmsService.GetPublicKey(input)
+
+	// output.PublicKey is DER-encoded X.509 public key also known as SubjectPublicKeyInfo (SPKI)
+	publicKey, err := x509.ParsePKIXPublicKey(output.PublicKey)
+	if err != nil {
+		return nil, err
+	}
+
+	publicKeyEcdsa, isEcdsa := publicKey.(*ecdsa.PublicKey)
+	if !isEcdsa {
+		return nil, fmt.Errorf("expected ecdsa public key but received %s", reflect.TypeOf(publicKeyEcdsa))
+	}
+
+	// TODO: check this against the standard, it should state what is the format of public-key for ecdsa
+	bytes := elliptic.Marshal(publicKeyEcdsa.Curve, publicKeyEcdsa.X, publicKeyEcdsa.Y)
+
 	if err != nil {
 		return nil, err
 	}
 	key := &data.Key{
 		Type:  h.keyType,
-		Value: data.KeyValue{Public: output.PublicKey },
+		Value: data.KeyValue{Public: bytes },
 	}
 
 	return key, nil

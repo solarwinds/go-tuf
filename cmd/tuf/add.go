@@ -9,7 +9,7 @@ import (
 
 func init() {
 	register("add", cmdAdd, `
-usage: tuf add [--expires=<days>] [--custom=<data>] [<path>...]
+usage: tuf add [--expires=<days> --manager=<type>] [--custom=<data>] [<path>...]
 
 Add target file(s).
 

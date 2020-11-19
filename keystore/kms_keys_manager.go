@@ -95,7 +95,9 @@ func (h *KmsPrivateKeyHandle) GetPublicKey() (*data.Key, error) {
 		return nil, fmt.Errorf("expected ecdsa public key but received %s", reflect.TypeOf(publicKeyEcdsa))
 	}
 
-	// TODO: check this against the standard, it should state what is the format of public-key for ecdsa
+	// TODO: standard says: PUBLIC is in PEM format and a string.
+	// so probably stright what comes from KMS, but this needs to be checked against the python impl
+	// but this elliptic.Marshal matches what the verifier impl did previously
 	bytes := elliptic.Marshal(publicKeyEcdsa.Curve, publicKeyEcdsa.X, publicKeyEcdsa.Y)
 
 	if err != nil {

@@ -3,6 +3,8 @@ module github.com/theupdateframework/go-tuf
 go 1.14
 
 require (
+	github.com/aws/aws-sdk-go v1.35.11
+	github.com/boltdb/bolt v1.3.1
 	github.com/dustin/go-humanize v1.0.0
 	github.com/flynn/go-docopt v0.0.0-20140912013429-f6dd2ebbb31e
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect

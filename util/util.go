@@ -14,6 +14,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -280,10 +281,13 @@ func AtomicallyWriteFile(filename string, data []byte, perm os.FileMode) error {
 		return err
 	}
 
-	if err = f.Chmod(perm); err != nil {
-		f.Close()
-		os.Remove(f.Name())
-		return err
+	// TODO: do not merge me
+	if runtime.GOOS != "windows" {
+		if err = f.Chmod(perm); err != nil {
+			f.Close()
+			os.Remove(f.Name())
+			return err
+		}
 	}
 
 	if err := f.Close(); err != nil {

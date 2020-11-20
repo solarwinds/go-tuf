@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/theupdateframework/go-tuf/data"
-	"github.com/theupdateframework/go-tuf/sign"
+	"github.com/theupdateframework/go-tuf/keystore"
 	"golang.org/x/crypto/ed25519"
 
 	. "gopkg.in/check.v1"
@@ -112,7 +112,7 @@ func (VerifySuite) Test(c *C) {
 		{
 			name: "more than enough signatures",
 			mut: func(t *test) {
-				k, _ := sign.GenerateEd25519Key()
+				k, _ := keystore.GenerateEd25519Key()
 				sign.Sign(t.s, k.Signer())
 				t.keys = append(t.keys, k.PublicData())
 				t.roles["root"].KeyIDs = append(t.roles["root"].KeyIDs, k.PublicData().IDs()...)
@@ -129,14 +129,14 @@ func (VerifySuite) Test(c *C) {
 		{
 			name: "unknown key",
 			mut: func(t *test) {
-				k, _ := sign.GenerateEd25519Key()
+				k, _ := keystore.GenerateEd25519Key()
 				sign.Sign(t.s, k.Signer())
 			},
 		},
 		{
 			name: "unknown key below threshold",
 			mut: func(t *test) {
-				k, _ := sign.GenerateEd25519Key()
+				k, _ := keystore.GenerateEd25519Key()
 				sign.Sign(t.s, k.Signer())
 				t.roles["root"].Threshold = 2
 			},
@@ -145,7 +145,7 @@ func (VerifySuite) Test(c *C) {
 		{
 			name: "unknown keys in db",
 			mut: func(t *test) {
-				k, _ := sign.GenerateEd25519Key()
+				k, _ := keystore.GenerateEd25519Key()
 				sign.Sign(t.s, k.Signer())
 				t.keys = append(t.keys, k.PublicData())
 			},
@@ -153,7 +153,7 @@ func (VerifySuite) Test(c *C) {
 		{
 			name: "unknown keys in db below threshold",
 			mut: func(t *test) {
-				k, _ := sign.GenerateEd25519Key()
+				k, _ := keystore.GenerateEd25519Key()
 				sign.Sign(t.s, k.Signer())
 				t.keys = append(t.keys, k.PublicData())
 				t.roles["root"].Threshold = 2
@@ -214,7 +214,7 @@ func (VerifySuite) Test(c *C) {
 			t.typ = t.role
 		}
 		if t.keys == nil && t.s == nil {
-			k, _ := sign.GenerateEd25519Key()
+			k, _ := keystore.GenerateEd25519Key()
 			t.s, _ = sign.Marshal(&signedMeta{Type: t.typ, Version: t.ver, Expires: *t.exp}, k.Signer())
 			t.keys = []*data.Key{k.PublicData()}
 		}

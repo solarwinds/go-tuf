@@ -7,7 +7,7 @@ import (
 
 func init() {
 	register("sign", cmdSign, `
-usage: tuf sign <manifest>
+usage: tuf sign [--manager=<type>] <manifest>
 
 Sign a manifest.
 `)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/theupdateframework/go-tuf/keystore"
 	"log"
 	"os"
 	"strconv"
@@ -30,6 +31,7 @@ Options:
 Commands:
   help         Show usage for a specific command
   gen-key      Generate a new signing key for a specific manifest
+  use-key      Use a key which already exists in an external key manager for signing a specific manifest
   revoke-key   Revoke a signing key
   add          Add target file(s)
   remove       Remove a target file
@@ -103,11 +105,22 @@ func runCommand(name string, args []string, dir string, insecure bool) error {
 		return err
 	}
 
-	var p util.PassphraseFunc
-	if !insecure {
-		p = getPassphrase
+	var keysManagerId string
+	if keysManagerId = parsedArgs.String["--manager"]; keysManagerId == "" {
+		keysManagerId = keystore.KeysManagerIdLocal
 	}
-	repo, err := tuf.NewRepo(tuf.FileSystemStore(dir, p))
+	var manager keystore.KeysManager
+	if keysManagerId == keystore.KeysManagerIdLocal {
+		var p util.PassphraseFunc
+		if !insecure {
+			p = getPassphrase
+		}
+		manager = keystore.NewLocalKeysManager(dir, p)
+	} else if keysManagerId == keystore.KeysMangerIdKms {
+		manager = keystore.NewKmsKeysManager(dir)
+	}
+
+	repo, err := tuf.NewRepo(tuf.FileSystemStore(dir), manager)
 	if err != nil {
 		return err
 	}

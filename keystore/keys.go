@@ -23,7 +23,6 @@ type PrivateKey struct {
 	publicKeyOnce sync.Once    `json:"-"`
 }
 
-
 func (k *PrivateKey) GetIDs() []string {
 	publicKey, err := k.GetPublicKey()
 	if err != nil {
@@ -31,6 +30,15 @@ func (k *PrivateKey) GetIDs() []string {
 	}
 	return publicKey.IDs()
 }
+
+func (k *PrivateKey) GetScheme() string {
+	return k.Scheme
+}
+
+func (k *PrivateKey) GetAlgorithms() []string {
+	return k.Algorithms
+}
+
 
 func (k *PrivateKey) ContainsKeyID(keyId string) bool {
 	publicKey, err := k.GetPublicKey()

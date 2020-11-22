@@ -44,11 +44,11 @@ type KmsPrivateKeyHandle struct
 {
 	keyIds 			 []string
 	keyType          string
+	scheme           string
+	algorithms       []string
 	kmsExternalKeyId string
 	manager          *KmsKeysManager
 }
-
-
 
 var _ Signer  = &KmsSigner{}
 type KmsSigner struct
@@ -59,6 +59,8 @@ type KmsSigner struct
 type KmsKeyEntry struct {
 	KeyRole      string `json:"role"`
 	KeyType      string `json:"type"`
+	Scheme       string `json:"scheme"`
+	Algorithms   []string `json:"algorithms"`
 	Arn          string `json:"arn"`
 	PublicKeyIds []string `json:"publicKeyIds"`
 }
@@ -66,6 +68,15 @@ type KmsKeyEntry struct {
 func (h *KmsPrivateKeyHandle) GetIDs() []string {
 	return h.keyIds
 }
+
+func (h *KmsPrivateKeyHandle) GetScheme() string {
+	return h.scheme
+}
+
+func (h *KmsPrivateKeyHandle) GetAlgorithms() []string {
+	return h.algorithms
+}
+
 
 func (h *KmsPrivateKeyHandle) ContainsKeyID(keyId string) bool {
 	for _, id := range h.keyIds {
@@ -115,6 +126,8 @@ func (h *KmsPrivateKeyHandle) GetPublicKey() (*data.Key, error) {
 	}
 	key := &data.Key{
 		Type:  h.keyType,
+		Scheme: h.scheme,
+		Algorithms: h.algorithms,
 		Value: data.KeyValue{Public: bytes },
 	}
 
@@ -172,10 +185,13 @@ func (m *KmsKeysManager) GenerateKey(keyRole string, keyType string) (PrivateKey
 	}
 
 	var customerMasterKeySec string
-	if keyType == data.KeyTypeECDSA_SHA2_P256 {
-		customerMasterKeySec = kms.DataKeyPairSpecEccNistP256
-	} else if keyType == data.KeyTypeRSASSA_PSS_SHA256 {
+	var scheme string
+	if keyType == data.KeyTypeRSASSA_PSS_SHA256 {
 		customerMasterKeySec = kms.DataKeyPairSpecRsa2048
+		scheme = data.KeySchemeRSASSA_PSS_SHA256
+	} else if keyType == data.KeyTypeECDSA_SHA2_P256 {
+		customerMasterKeySec = kms.DataKeyPairSpecEccNistP256
+		scheme = data.KeySchemeECDSA_SHA2_P256
 	} else if keyType == data.KeyTypeEd25519 {
 		return nil, fmt.Errorf("KMS does not support keys of %s type, use either %s or %s", data.KeyTypeEd25519, data.KeyTypeECDSA_SHA2_P256, data.KeyTypeRSASSA_PSS_SHA256)
 	} else {
@@ -277,6 +293,8 @@ func (m *KmsKeysManager) GenerateKey(keyRole string, keyType string) (PrivateKey
 		manager: m,
 		kmsExternalKeyId: *createKeyOutput.KeyMetadata.KeyId,
 		keyType: keyType,
+		scheme: scheme,
+		algorithms: data.KeyAlgorithms,
 	}
 
 	publicKey, err := privateKeyHandle.GetPublicKey()
@@ -311,6 +329,8 @@ func (m *KmsKeysManager) GenerateKey(keyRole string, keyType string) (PrivateKey
 	err = m.addKeyEntry(&KmsKeyEntry {
 		KeyRole: keyRole,
 		KeyType: keyType,
+		Scheme: data.KeySchemeECDSA_SHA2_P256,
+		Algorithms: data.KeyAlgorithms,
 		Arn: *createKeyOutput.KeyMetadata.Arn,
 		PublicKeyIds: ids,
 	})
@@ -329,12 +349,14 @@ func (m *KmsKeysManager) ImportKey(keyRole string, externalKeyId string) (Privat
 	describeKeyOutput, err := kmsService.DescribeKey(describeKeyInput)
 	if err != nil { return nil, err }
 
-	var keyType string
+	var keyType, scheme string
 	spec := *describeKeyOutput.KeyMetadata.CustomerMasterKeySpec
 	if spec == kms.CustomerMasterKeySpecRsa2048 {
 		keyType = data.KeyTypeRSASSA_PSS_SHA256
+		scheme = data.KeyTypeRSASSA_PSS_SHA256
 	} else if spec == kms.CustomerMasterKeySpecEccNistP256 {
 		keyType = data.KeyTypeECDSA_SHA2_P256
+		scheme = data.KeySchemeECDSA_SHA2_P256
 	} else {
 		return nil, fmt.Errorf("failed to import the key from KMS, key spec %s is not supported, only key specs %s and %s are supported", spec,
 			kms.CustomerMasterKeySpecRsa2048, kms.CustomerMasterKeySpecEccNistP256)
@@ -344,6 +366,8 @@ func (m *KmsKeysManager) ImportKey(keyRole string, externalKeyId string) (Privat
 		manager: m,
 		kmsExternalKeyId: *describeKeyOutput.KeyMetadata.KeyId,
 		keyType: keyType,
+		scheme: scheme,
+		algorithms: data.KeyAlgorithms,
 	}
 
 	publicKey, err := privateKeyHandle.GetPublicKey()
@@ -354,6 +378,8 @@ func (m *KmsKeysManager) ImportKey(keyRole string, externalKeyId string) (Privat
 	err = m.addKeyEntry(&KmsKeyEntry	{
 		KeyRole: keyRole,
 		KeyType: keyType,
+		Scheme: data.KeySchemeECDSA_SHA2_P256,
+		Algorithms: data.KeyAlgorithms,
 		Arn: *describeKeyOutput.KeyMetadata.Arn,
 		PublicKeyIds:publicKey.IDs(),
 	})
@@ -375,6 +401,8 @@ func (m *KmsKeysManager) GetPrivateKeyHandles(keyRole string) ([]PrivateKeyHandl
 			handle := &KmsPrivateKeyHandle{
 				keyIds:           entry.PublicKeyIds,
 				keyType:          entry.KeyType,
+				scheme:           entry.Scheme,
+				algorithms:       entry.Algorithms,
 				kmsExternalKeyId: entry.Arn,
 				manager:          m,
 			}
@@ -480,11 +508,11 @@ func (s *KmsSigner) Sign(bytes []byte) ([]byte, error) {
 
 	var algorithm string
 	var digest []byte
-	if s.key.keyType == data.KeyTypeRSASSA_PSS_SHA256{
+	if s.key.scheme == data.KeySchemeRSASSA_PSS_SHA256{
 		algorithm = kms.SigningAlgorithmSpecRsassaPssSha256
 		d := sha256.Sum256(bytes)
 		digest = d[:]
-	} else if s.key.keyType == data.KeyTypeECDSA_SHA2_P256 {
+	} else if s.key.scheme == data.KeySchemeECDSA_SHA2_P256 {
 		algorithm = kms.SigningAlgorithmSpecEcdsaSha256
 		d := sha256.Sum256(bytes)
 		digest = d[:]

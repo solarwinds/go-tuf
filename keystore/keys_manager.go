@@ -22,6 +22,8 @@ type PrivateKeyHandle interface {
 	GetIDs() []string
 	ContainsKeyID(keyId string) bool
 	GetType() string
+	GetScheme() string
+	GetAlgorithms() []string
 	GetPublicKey() (*data.Key, error)
 	GetSigner() (Signer, error)
 }
